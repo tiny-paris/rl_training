@@ -5,7 +5,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from isaaclab.utils import configclass
+from isaaclab.managers import TerminationTermCfg as DoneTerm
 
+import rl_training.tasks.manager_based.locomotion.velocity.mdp as mdp
 from rl_training.tasks.manager_based.locomotion.velocity.velocity_env_cfg import LocomotionVelocityRoughEnvCfg
 # from isaaclab.sensors.ray_caster import GridPatternCfg
 ##
@@ -171,7 +173,14 @@ class DeeproboticsLite3RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Terminations------------------------------
         self.terminations.illegal_contact = None
-        # self.terminations.bad_orientation_2 = None
+        self.terminations.bad_orientation_2 = None
+        self.terminations.flipped_unrecovered = DoneTerm(
+            func=mdp.flipped_unrecovered,
+            params={
+                "threshold": -0.7,
+                "time_threshold_s": 4.0,
+            },
+        )
 
         # ------------------------------Curriculums------------------------------
         # self.curriculum.command_levels.params["range_multiplier"] = (0.2, 1.0)

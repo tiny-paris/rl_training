@@ -14,7 +14,7 @@ from isaaclab.assets import Articulation, RigidObject
 from isaaclab.managers import SceneEntityCfg
 
 if TYPE_CHECKING:
-    from isaaclab.envs import ManagerBasedEnv
+    from isaaclab.envs import ManagerBasedEnv, ManagerBasedRLEnv
 
 
 def randomize_rigid_body_inertia(
@@ -211,3 +211,44 @@ def bad_orientation_2(
     # extract the used quantities (to enable type-hinting)
     asset: RigidObject = env.scene[asset_cfg.name]
     return (asset.data.projected_gravity_b[:, 2] > 0) | (asset.data.projected_gravity_b[:, :2].abs() > 0.7).any(-1)
+
+
+def flipped_unrecovered(
+    env: ManagerBasedRLEnv,
+    threshold: float = -0.7,
+    time_threshold_s: float = 4.0,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """
+    Terminate the episode only if the robot remains flipped for a time window.
+
+    Args:
+        threshold: Threshold on projected_gravity_b[:, 2]. Upright is about -1.0.
+        time_threshold_s: Duration that the robot may stay flipped before termination.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    is_flipped = asset.data.projected_gravity_b[:, 2] > threshold
+
+    if not hasattr(env, "_flip_duration_buf"):
+        env._flip_duration_buf = torch.zeros(env.num_envs, device=env.device)
+        env._last_episode_length = torch.full(
+            (env.num_envs,), -1, device=env.device, dtype=env.episode_length_buf.dtype
+        )
+    elif env._flip_duration_buf.shape[0] != env.num_envs:
+        env._flip_duration_buf = torch.zeros(env.num_envs, device=env.device)
+        env._last_episode_length = torch.full(
+            (env.num_envs,), -1, device=env.device, dtype=env.episode_length_buf.dtype
+        )
+
+    current_episode_length = env.episode_length_buf
+    reset_mask = current_episode_length < env._last_episode_length
+    initial_mask = env._last_episode_length < 0
+    env._flip_duration_buf[reset_mask | initial_mask] = 0.0
+    env._last_episode_length = current_episode_length.clone()
+
+    env._flip_duration_buf += is_flipped.float() * env.step_dt
+    env._flip_duration_buf *= is_flipped.float()
+
+    should_terminate = env._flip_duration_buf >= time_threshold_s
+    env._flip_duration_buf[should_terminate] = 0.0
+    return should_terminate
